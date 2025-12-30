@@ -1,0 +1,260 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>握り詰将棋メーカー v8</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+    <style>
+        #main-wrapper { transition: transform 0.2s; transform-origin: top center; }
+        .shogi-board { display: grid; grid-template-columns: repeat(9, 1fr); border: 2px solid #333; background: #e3d3a1; }
+        .cell { width: 48px; height: 52px; border: 1px solid #b5a67d; display: flex; align-items: center; justify-content: center; cursor: pointer; font-size: 1.6rem; position: relative; }
+        .komadai { background-color: #dcb35c; border: 2px solid #8b4513; border-bottom: 4px solid #5d2e0d; border-radius: 4px; padding: 4px; min-height: 50px; display: flex; flex-wrap: wrap; gap: 2px; }
+        .side-box { width: 100px; display: flex; flex-direction: column; gap: 10px; align-items: center; }
+
+        .special-zone {
+            width: 100%; border: 3px dashed #8b4513; border-radius: 12px; padding: 10px 4px;
+            text-align: center; font-size: 11px; font-weight: bold; cursor: pointer;
+            min-height: 80px; display: flex; flex-direction: column; justify-content: center;
+        }
+        .exchange-zone { background: #fef3c7; color: #92400e; border-color: #d97706; }
+        .box-zone { background: #fdf2f8; color: #9d174d; border-color: #be185d; }
+        .add-zone { background: #ecfdf5; color: #065f46; border-color: #059669; }
+
+        .promoted { color: #d91e18; }
+        .gote { transform: rotate(180deg); }
+        
+        #visual-state {
+            width: 70px; height: 80px; background: #f3e5ab; border: 3px solid #8b4513;
+            border-radius: 10px; display: flex; align-items: center; justify-content: center;
+            font-size: 3rem; font-weight: bold; cursor: pointer; box-shadow: 0 4px 8px rgba(0,0,0,0.15);
+        }
+        .selected-piece { outline: 5px solid #f59e0b; background: #fef3c7; z-index: 10; }
+    </style>
+</head>
+<body class="bg-stone-300 p-1 flex flex-col items-center min-h-screen overflow-x-hidden text-slate-900">
+
+    <div id="main-wrapper" class="flex flex-col items-center w-full">
+        <h1 class="text-xl font-bold my-2 text-stone-800">握り詰将棋メーカー v8</h1>
+
+        <div id="setup" class="bg-white p-6 rounded-xl shadow-xl text-center my-10 w-full max-w-sm">
+            <label class="flex items-center justify-center gap-2 mb-6 cursor-pointer bg-stone-50 p-3 rounded border">
+                <input type="checkbox" id="double-king" class="w-5 h-5">
+                <span class="font-bold">玉を2枚入れる</span>
+            </label>
+            <div class="grid gap-2 text-sm">
+                <button onclick="startGame('toothpick')" class="p-3 bg-slate-500 text-white rounded-lg font-bold shadow hover:bg-slate-600">
+                    🥢 つまようじ <span class="text-[10px] block font-normal">(1〜2枚)</span>
+                </button>
+                <button onclick="startGame('spoon')" class="p-3 bg-sky-600 text-white rounded-lg font-bold shadow hover:bg-sky-700">
+                    🥄 スプーン <span class="text-[10px] block font-normal">(3〜5枚)</span>
+                </button>
+                <button onclick="startGame('shovel')" class="p-3 bg-emerald-700 text-white rounded-lg font-bold shadow hover:bg-emerald-800">
+                    🚜 シャベル <span class="text-[10px] block font-normal">(6〜10枚)</span>
+                </button>
+                <button onclick="startGame('excavator')" class="p-3 bg-amber-500 text-white rounded-lg font-bold shadow hover:bg-amber-600">
+                    🏗️ ショベルカー <span class="text-[10px] block font-normal">(11枚〜)</span>
+                </button>
+            </div>
+        </div>
+
+        <div id="game-area" class="hidden flex flex-col items-center w-full">
+            
+            <div class="flex items-start justify-center gap-2 w-full">
+                <div class="side-box pt-6">
+                    <div class="text-center">
+                        <p class="text-[9px] font-bold text-stone-600 mb-1">今の向き・成</p>
+                        <div id="visual-state" class="gote" onclick="cycleState()">歩</div>
+                        <p class="text-[8px] mt-1 text-stone-500">クリックで切替</p>
+                    </div>
+                    <div class="bg-white p-2 rounded shadow border text-center w-full">
+                        <p class="text-[9px] font-bold mb-1 italic">全体ズーム</p>
+                        <div class="flex flex-col gap-1">
+                            <button onclick="adjustZoom(0.1)" class="bg-gray-200 py-1 rounded">+</button>
+                            <span id="zoom-val" class="text-[10px] font-mono">1.0</span>
+                            <button onclick="adjustZoom(-0.1)" class="bg-gray-200 py-1 rounded">-</button>
+                        </div>
+                    </div>
+                </div>
+
+                <div id="capture-target" class="p-3 rounded bg-stone-100 shadow-lg">
+                    <p class="text-[9px] font-bold text-stone-500">相手駒台</p>
+                    <div id="stand-top" class="komadai mb-1 gote" onclick="handleStandClick('stand-top', event)"></div>
+                    <div id="board" class="shogi-board mb-1"></div>
+                    <p class="text-[9px] font-bold text-stone-500 text-right">自分駒台</p>
+                    <div id="stand-bottom" class="komadai" onclick="handleStandClick('stand-bottom', event)"></div>
+                </div>
+
+                <div class="side-box pt-6">
+                    <div onclick="addOnePiece()" class="special-zone add-zone shadow-md">
+                        <span class="text-xl">✨</span><br>駒を追加<br><span class="text-[8px] font-normal">+1枚</span>
+                    </div>
+                    <div onclick="exchangePiece()" class="special-zone exchange-zone shadow-sm">
+                        <span class="text-xl">🔄</span><br>駒交換
+                    </div>
+                    <div onclick="discardPiece()" class="special-zone box-zone shadow-sm">
+                        <span class="text-xl">📦</span><br>駒箱に<br>戻す
+                    </div>
+                    <button onclick="saveImage()" class="w-full bg-slate-800 text-white py-3 rounded text-[10px] font-bold shadow-lg leading-tight">
+                        画像保存<br>& X投稿
+                    </button>
+                </div>
+            </div>
+
+            <div class="w-full max-w-lg bg-white p-3 mt-4 rounded-xl border-4 border-orange-200 shadow-xl">
+                <p class="text-xs font-bold text-orange-800 mb-2 flex justify-between">
+                    <span>すくった駒</span>
+                    <span id="hand-count"></span>
+                </p>
+                <div id="hand" class="flex flex-wrap gap-2 justify-center"></div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const piecesPool = ["歩","歩","歩","歩","歩","歩","歩","歩","歩","歩","歩","歩","歩","歩","歩","歩","歩","歩","香","香","香","香","桂","桂","桂","桂","銀","銀","銀","銀","金","金","金","金","角","角","飛","飛"];
+        const promoMap = {"歩":"と","香":"杏","桂":"圭","銀":"全","角":"馬","飛":"龍"};
+        const reversePromoMap = {"と":"歩","杏":"香","圭":"桂","全":"銀","馬":"角","龍":"飛"};
+        
+        let handPieces = [];
+        let selectedHandIndex = null;
+        let currentState = 2; // デフォルト：逆
+        let currentZoom = 1.0;
+
+        function adjustZoom(delta) {
+            currentZoom = Math.min(Math.max(0.4, currentZoom + delta), 2.5);
+            document.getElementById('zoom-val').innerText = currentZoom.toFixed(1);
+            document.getElementById('main-wrapper').style.transform = `scale(${currentZoom})`;
+        }
+
+        function cycleState() {
+            currentState = (currentState + 1) % 4;
+            updateVisualState();
+        }
+
+        function updateVisualState() {
+            const visual = document.getElementById('visual-state');
+            visual.innerText = (currentState % 2 === 1) ? "と" : "歩";
+            visual.classList.toggle('promoted', currentState % 2 === 1);
+            visual.classList.toggle('gote', currentState >= 2);
+        }
+
+        function startGame(type) {
+            document.getElementById('setup').classList.add('hidden');
+            document.getElementById('game-area').classList.remove('hidden');
+            const isDoubleKing = document.getElementById('double-king').checked;
+            handPieces = isDoubleKing ? ["玉", "玉"] : ["玉"];
+            
+            let count = 0;
+            if (type === 'toothpick') count = Math.floor(Math.random() * 2) + 1; // 1-2枚
+            else if (type === 'spoon') count = Math.floor(Math.random() * 3) + 3;
+            else if (type === 'shovel') count = Math.floor(Math.random() * 5) + 6;
+            else count = Math.floor(Math.random() * 10) + 11;
+
+            for(let i=0; i<count; i++) handPieces.push(piecesPool[Math.floor(Math.random() * piecesPool.length)]);
+            updateVisualState();
+            renderHand();
+            createBoard();
+        }
+
+        function addOnePiece() {
+            const newPiece = piecesPool[Math.floor(Math.random() * piecesPool.length)];
+            handPieces.push(newPiece);
+            renderHand();
+        }
+
+        function createBoard() {
+            const board = document.getElementById('board');
+            board.innerHTML = '';
+            for (let i = 0; i < 81; i++) {
+                const cell = document.createElement('div');
+                cell.className = 'cell';
+                cell.onclick = () => handleCellClick(cell);
+                board.appendChild(cell);
+            }
+        }
+
+        function renderHand() {
+            const handDiv = document.getElementById('hand');
+            handDiv.innerHTML = '';
+            handPieces.sort().forEach((p, i) => {
+                const btn = document.createElement('button');
+                btn.className = `w-12 h-14 bg-stone-50 border-2 rounded flex items-center justify-center font-bold text-2xl shadow-sm ${selectedHandIndex === i ? 'selected-piece' : ''}`;
+                btn.innerText = p;
+                btn.onclick = (e) => { e.stopPropagation(); selectedHandIndex = (selectedHandIndex === i) ? null : i; renderHand(); };
+                handDiv.appendChild(btn);
+            });
+            document.getElementById('hand-count').innerText = `${handPieces.length}枚`;
+        }
+
+        function handleCellClick(cell) {
+            if (selectedHandIndex !== null) {
+                if (cell.innerText !== "") return; 
+                placePiece(cell);
+            } else if (cell.innerText !== "") {
+                returnPiece(cell.innerText);
+                cell.innerText = "";
+                cell.className = "cell";
+            }
+        }
+
+        function handleStandClick(standId, event) {
+            if (selectedHandIndex !== null) {
+                const stand = document.getElementById(standId);
+                const p = document.createElement('span');
+                p.className = "text-3xl font-bold cursor-pointer m-1 inline-block hover:bg-orange-200 rounded";
+                placePiece(p);
+                p.onclick = (e) => { e.stopPropagation(); returnPiece(p.innerText); p.remove(); };
+                stand.appendChild(p);
+            }
+        }
+
+        function exchangePiece() {
+            if (selectedHandIndex === null) return;
+            if (handPieces[selectedHandIndex] === "玉") return alert("玉は交換不可");
+            handPieces[selectedHandIndex] = piecesPool[Math.floor(Math.random() * piecesPool.length)];
+            selectedHandIndex = null;
+            renderHand();
+        }
+
+        function discardPiece() {
+            if (selectedHandIndex === null) return;
+            if (handPieces[selectedHandIndex] === "玉") return alert("玉は戻せません");
+            handPieces.splice(selectedHandIndex, 1);
+            selectedHandIndex = null;
+            renderHand();
+        }
+
+        function placePiece(element) {
+            const baseName = handPieces[selectedHandIndex];
+            const isPromoted = currentState % 2 === 1;
+            const isGote = currentState >= 2;
+            element.innerText = isPromoted ? (promoMap[baseName] || baseName) : baseName;
+            element.classList.toggle('promoted', isPromoted);
+            element.classList.toggle('gote', isGote);
+            handPieces.splice(selectedHandIndex, 1);
+            selectedHandIndex = null;
+            renderHand();
+        }
+
+        function returnPiece(currentText) {
+            handPieces.push(reversePromoMap[currentText] || currentText);
+            renderHand();
+        }
+
+        async function saveImage() {
+            const target = document.getElementById('capture-target');
+            const originalTransform = document.getElementById('main-wrapper').style.transform;
+            document.getElementById('main-wrapper').style.transform = "scale(1)";
+            const canvas = await html2canvas(target, { backgroundColor: '#d6d3d1', scale: 2 });
+            document.getElementById('main-wrapper').style.transform = originalTransform;
+            const link = document.createElement('a');
+            link.download = 'nigiri-tsume.png';
+            link.href = canvas.toDataURL();
+            link.click();
+            window.open("https://twitter.com/intent/tweet?text=" + encodeURIComponent("握り詰将棋を作りました！ #将棋 #握り詰将棋"));
+        }
+    </script>
+</body>
+</html>
